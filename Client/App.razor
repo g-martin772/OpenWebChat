@@ -1,0 +1,240 @@
+﻿@using Microsoft.AspNetCore.Components.Web
+@using Microsoft.AspNetCore.SignalR.Client
+@using Microsoft.JSInterop
+@inject HubConnection Hub
+@inject IJSRuntime Js
+
+<div class="terminal">
+    <div class="output" @ref="_outputDiv">
+        @foreach (var line in _output)
+        {
+            <div class="@line.Type">@line.Text</div>
+        }
+    </div>
+    <div class="input-line">
+        <span class="prompt">@_prompt></span>
+        <input @bind-value="_input" 
+               @bind-value:event="oninput" 
+               @onkeydown="HandleKeyPress" 
+               @ref="_inputElement"/>
+    </div>
+</div>
+
+<style>
+    .terminal {
+        background-color: black;
+        color: #00ff00;
+        font-family: monospace;
+        padding: 1rem;
+        height: calc(100vh - 50px);
+        display: flex;
+        flex-direction: column;
+    }
+    
+    .output {
+        flex-grow: 1;
+        overflow-y: auto;
+    }
+    
+    .input-line {
+        display: flex;
+        gap: 0.5rem;
+    }
+    
+    input {
+        background: transparent;
+        border: none;
+        color: #00ff00;
+        font-family: monospace;
+        flex-grow: 1;
+        outline: none;
+    }
+    
+    .error { color: red; }
+    .system { color: yellow; }
+    .message { color: #00ff00; }
+</style>
+
+@code {
+    private ElementReference _outputDiv;
+    private ElementReference _inputElement;
+    private string _input = "";
+    private string _prompt = "guest";
+    private List<(string Text, string Type)> _output = new();
+    private bool _isConnected;
+    private string _newName;
+
+    protected override async Task OnInitializedAsync()
+    {
+        Hub.On<string, string>("ReceiveMessage", (user, message) =>
+        {
+            AddLine($"{user}: {message}", "message");
+            return Task.CompletedTask;
+        });
+
+        Hub.On<List<string>>("RoomsUpdate", rooms =>
+        {
+            AddLine("Available rooms:", "system");
+            foreach (var room in rooms)
+            {
+                AddLine($"- {room}", "system");
+            }
+            return Task.CompletedTask;
+        });
+
+        SetupHubCallbacks();
+        
+        try
+        {
+            await Hub.StartAsync();
+            _isConnected = true;
+            AddLine("Connected to chat server", "system");
+            AddLine("Please set your name using /name <username>", "system");
+        }
+        catch
+        {
+            AddLine("Failed to connect to server", "error");
+        }
+    }
+
+    private void SetupHubCallbacks()
+    {
+        Hub.On("NameSetSuc", () =>
+        {
+            _prompt = _newName;
+            StateHasChanged();
+            AddLine("Name set successfully", "system");
+            return Task.CompletedTask;
+        });
+
+        Hub.On("JoinRoomSuc", () =>
+        {
+            AddLine($"Joined room successfully", "system");
+            return Task.CompletedTask;
+        });
+
+        Hub.On("LeaveRoomSuc", () =>
+        {
+            AddLine("Left room successfully", "system");
+            return Task.CompletedTask;
+        });
+
+        Hub.On("CreateRoomSuc", () =>
+        {
+            AddLine("Room created successfully", "system");
+            return Task.CompletedTask;
+        });
+
+        SetupErrorCallbacks();
+    }
+
+    private void SetupErrorCallbacks()
+    {
+        Hub.On("NameSetFail", () =>
+        {
+            AddLine("Failed to set name", "error");
+            return Task.CompletedTask;
+        });
+
+        Hub.On("JoinRoomFail", () =>
+        {
+            AddLine("Failed to join room", "error");
+            return Task.CompletedTask;
+        });
+
+        Hub.On("CreateRoomFail", () =>
+        {
+            AddLine("Failed to create room", "error");
+            return Task.CompletedTask;
+        });
+
+        Hub.On("SendMessageFail", () =>
+        {
+            AddLine("Failed to send message", "error");
+            return Task.CompletedTask;
+        });
+    }
+
+    private async Task HandleKeyPress(KeyboardEventArgs e)
+    {
+        if (e.Key != "Enter" || string.IsNullOrWhiteSpace(_input)) return;
+
+        AddLine($"{_prompt}> {_input}", "message");
+
+        if (_input.StartsWith("/"))
+        {
+            await HandleCommand();
+        }
+        else
+        {
+            await Hub.SendAsync("SendMessage", _input);
+        }
+
+        _input = "";
+        await Js.InvokeVoidAsync("scrollToBottom", _outputDiv);
+    }
+
+    private async Task HandleCommand()
+    {
+        var parts = _input.Split(' ');
+        var command = parts[0].ToLower();
+
+        switch (command)
+        {
+            case "/ls":
+                await Hub.SendAsync("GetRooms");
+                break;
+            case "/join":
+                if (parts.Length < 2)
+                {
+                    AddLine("Usage: /join <room>", "error");
+                    return;
+                }
+                await Hub.SendAsync("JoinRoom", parts[1]);
+                break;
+            case "/leave":
+                await Hub.SendAsync("LeaveRoom");
+                break;
+            case "/create":
+                if (parts.Length < 2)
+                {
+                    AddLine("Usage: /create <room>", "error");
+                    return;
+                }
+                await Hub.SendAsync("CreateRoom", parts[1]);
+                break;
+            case "/name":
+                if (parts.Length < 2)
+                {
+                    AddLine("Usage: /name <username>", "error");
+                    return;
+                }
+                await Hub.SendAsync("SetName", parts[1]);
+                _newName = parts[1];
+                break;
+            case "/help":
+                ShowHelp();
+                break;
+            default:
+                AddLine("Unknown command. Type /help for available commands", "error");
+                break;
+        }
+    }
+
+    private void ShowHelp()
+    {
+        AddLine("Available commands:", "system");
+        AddLine("/name <username> - Set your username", "system");
+        AddLine("/ls - List available rooms", "system");
+        AddLine("/join <room> - Join a room", "system");
+        AddLine("/leave - Leave current room", "system");
+        AddLine("/create <room> - Create a new room", "system");
+        AddLine("/help - Show this help message", "system");
+    }
+
+    private void AddLine(string text, string type)
+    {
+        _output.Add((text, type));
+        StateHasChanged();
+    }
+}
