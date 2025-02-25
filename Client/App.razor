@@ -15,7 +15,7 @@
         <span class="prompt">@m_Prompt></span>
         <input @bind-value="m_Input"
                @bind-value:event="oninput"
-               @onkeydown="HandleKeyPress" />
+               @onkeydown="HandleKeyPress"/>
     </div>
 </div>
 
@@ -71,7 +71,8 @@
     private string m_NewName = "guest";
     private readonly List<string> m_CommandHistory = [];
     private int m_HistoryIndex = -1;
-    
+    private List<string> m_Members = [];
+
     protected override async Task OnAfterRenderAsync(bool firstRender) => await FocusInput();
     private async Task FocusInput() => await Js.InvokeVoidAsync("eval", "document.querySelector('.terminal input').focus()");
 
@@ -93,6 +94,8 @@
 
             return Task.CompletedTask;
         });
+
+        Hub.On<List<string>>("MembersUpdate", names => m_Members = names);
 
         SetupHubCallbacks();
 
@@ -195,6 +198,7 @@
                     m_Input = m_CommandHistory[m_HistoryIndex];
                     StateHasChanged();
                 }
+
                 break;
 
             case "ArrowDown":
@@ -204,6 +208,7 @@
                     m_Input = m_HistoryIndex >= 0 ? m_CommandHistory[m_HistoryIndex] : "";
                     StateHasChanged();
                 }
+
                 break;
         }
     }
@@ -218,6 +223,11 @@
             case "/ls":
                 await Hub.SendAsync("GetRooms");
                 break;
+            case "/members":
+                await Hub.SendAsync("GetRooms");
+                var namesString = string.Concat(m_Members.Select(m => m + " "));
+                AddLine($"Members: {namesString}", "system");
+                break;
             case "/join":
                 if (parts.Length < 2)
                 {
@@ -229,6 +239,15 @@
                 break;
             case "/leave":
                 await Hub.SendAsync("LeaveRoom");
+                break;
+            case "/delete":
+                if (parts.Length < 2)
+                {
+                    AddLine("Usage: /delete <room>", "error");
+                    return;
+                }
+
+                await Hub.SendAsync("DeleteRoom", parts[1]);
                 break;
             case "/create":
                 if (parts.Length < 2)

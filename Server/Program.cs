@@ -28,6 +28,17 @@ class ChatHub : Hub
         Clients.Caller.SendAsync("NameSetFail");
     }
 
+    [HubMethodName("GetMembers")]
+    public void GetMembers()
+    {
+        var roomName = m_RoomMembers.FirstOrDefault(r => r.ConnectionId == Context.ConnectionId).RoomName;
+
+        if (roomName is null)
+            return;
+        
+        Clients.Caller.SendAsync("MembersUpdate", m_RoomMembers.Where(r => r.RoomName == roomName).Select(r => r.ConnectionId));
+    }
+
     [HubMethodName("GetRooms")]
     public void GetRooms() => Clients.Caller.SendAsync("RoomsUpdate", m_Rooms);
 
@@ -62,6 +73,7 @@ class ChatHub : Hub
         m_RoomMembers.Add((roomName, Context.ConnectionId));
         Groups.AddToGroupAsync(Context.ConnectionId, roomName);
         Clients.Caller.SendAsync("JoinRoomSuc");
+        Clients.Group(roomName).SendAsync("MembersUpdate", m_RoomMembers.Where(r => r.RoomName == roomName).Select(r => r.ConnectionId));
         Clients.Group(roomName).SendAsync("ReceiveMessage", "[Server]", $"{m_NamesTaken.First(n => n.ConnectionId == Context.ConnectionId).Name} has joined the room.");
     }
     
@@ -76,6 +88,7 @@ class ChatHub : Hub
         m_RoomMembers.RemoveAll(r => r.ConnectionId == Context.ConnectionId);
         Groups.RemoveFromGroupAsync(Context.ConnectionId, roomName);
         Clients.Caller.SendAsync("LeaveRoomSuc");
+        Clients.Group(roomName).SendAsync("MembersUpdate", m_RoomMembers.Where(r => r.RoomName == roomName).Select(r => r.ConnectionId));
         Clients.Group(roomName).SendAsync("ReceiveMessage", "[Server]", $"{m_NamesTaken.First(n => n.ConnectionId == Context.ConnectionId).Name} has left the room.");
     }
     
